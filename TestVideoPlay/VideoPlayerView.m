@@ -185,12 +185,11 @@ CGFloat viewPreviewWidth = 0;
     CMTime duration = self.player.currentItem.duration;
     
     if (_isDoneLoading) {
-    
         Float64 seconds = CMTimeGetSeconds(duration);
         double value = (Float64) self.videoSlider.value * seconds;
         CMTime seekTime = CMTimeMake((int64_t) value, 1);
-    
-       // handle slider state.
+        
+        // handle slider state.
         UITouch *touchEvent = [[event allTouches] anyObject];
         switch (touchEvent.phase) {
             case UITouchPhaseBegan:
@@ -218,8 +217,8 @@ CGFloat viewPreviewWidth = 0;
                     self.isPlaying = false;
                 }
                 [self.player seekToTime:seekTime completionHandler:^(BOOL finished) {
+                     self.isSliding = false;
                 }];
-                self.isSliding = false;
                 break;
             default:
                 break;
