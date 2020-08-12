@@ -216,14 +216,18 @@ CGFloat viewPreviewWidth = 0;
                     self.isDonePlaying = false;
                     self.isPlaying = false;
                 }
-                [self.player seekToTime:seekTime completionHandler:^(BOOL finished) {
-                     self.isSliding = false;
-                }];
+                [self seekTime:seekTime];
                 break;
             default:
                 break;
         }
     }
+}
+
+- (void)seekTime:(CMTime)time {
+    [self.player seekToTime:time completionHandler:^(BOOL finished) {
+        self.isSliding = false;
+    }];
 }
 
 - (UIImageView *)imageFullScreen {
