@@ -16,6 +16,7 @@ CGFloat marginIn = 16;
 CGFloat beginPoint = 0;
 CGFloat stopPoint = 0;
 CGFloat viewPreviewWidth = 0;
+CGFloat fullScreenImageHeight = 25;
 
 @interface VideoPlayerView () {
     NSLayoutConstraint *viewPreviewXConstraints;
@@ -364,8 +365,8 @@ CGFloat viewPreviewWidth = 0;
     [self.controlsContainerView addSubview:self.imageFullScreen];
     [[self.imageFullScreen.rightAnchor constraintEqualToAnchor:self.controlsContainerView.rightAnchor constant:-marginIn]setActive:true];
     [[self.imageFullScreen.bottomAnchor constraintEqualToAnchor:self.videoSlider.topAnchor]setActive:true];
-    [[self.imageFullScreen.heightAnchor constraintEqualToConstant:20]setActive:true];
-    [[self.imageFullScreen.widthAnchor constraintEqualToConstant:20]setActive:true];
+    [[self.imageFullScreen.heightAnchor constraintEqualToConstant:fullScreenImageHeight]setActive:true];
+    [[self.imageFullScreen.widthAnchor constraintEqualToConstant:fullScreenImageHeight]setActive:true];
     
     // preview view constraints.
     [self.controlsContainerView addSubview:self.viewPreview];
