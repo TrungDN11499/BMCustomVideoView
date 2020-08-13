@@ -33,6 +33,7 @@ CGFloat viewPreviewWidth = 0;
 @property (nonatomic, assign) bool isDoneLoading;
 @property (nonatomic, assign) bool isSetTimmer;
 @property (nonatomic, assign) bool isDonePlaying;
+@property (nonatomic, assign) bool isFourceStop;
 @property (nonatomic, assign) NSString *urlString;
 @property (nonatomic, strong) AVPlayer *player;
 @property (nonatomic, strong) AVPlayer *playerPreview;
@@ -60,7 +61,7 @@ CGFloat viewPreviewWidth = 0;
 - (UIButton *)pausePlayButton {
     if (!_pausePlayButton) {
         _pausePlayButton = [UIButton buttonWithType:UIButtonTypeSystem];
-         [_pausePlayButton setImage:[UIImage imageNamed:@"pause"] forState:UIControlStateNormal];
+        [_pausePlayButton setImage:[UIImage imageNamed:@"pause"] forState:UIControlStateNormal];
         _pausePlayButton.translatesAutoresizingMaskIntoConstraints = false;
         _pausePlayButton.tintColor = UIColor.whiteColor;
         [_pausePlayButton setHidden:true];
@@ -136,8 +137,8 @@ CGFloat viewPreviewWidth = 0;
         [_videoSlider setThumbImage:[self makeCircleWith:CGSizeMake(thumbRadius, thumbRadius) color:UIColor.redColor] forState:UIControlStateNormal];
         _videoSlider.translatesAutoresizingMaskIntoConstraints = false;
         [_videoSlider addTarget:self action:@selector(handleSliderChange:event:) forControlEvents:UIControlEventValueChanged];
-        UITapGestureRecognizer *gr = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(sliderTapped:)];
-        [_videoSlider addGestureRecognizer:gr];
+        UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(sliderTapped:)];
+        [_videoSlider addGestureRecognizer:tapGesture];
     }
     
     return _videoSlider;
@@ -175,16 +176,18 @@ CGFloat viewPreviewWidth = 0;
 }
 
 - (void)handleSliderChange: (UISlider *)slider event: (UIEvent *) event {
+    _isFourceStop = false;
+
     CGRect trackRect = [slider trackRectForBounds:slider.bounds];
     CGRect thumbRect = [slider thumbRectForBounds:slider.bounds trackRect:trackRect value:slider.value];
-
+    
     if (thumbRect.origin.x >= beginPoint && thumbRect.origin.x <= stopPoint && self->viewPreviewXConstraints) {
         self->viewPreviewXConstraints.constant = thumbRect.origin.x - viewPreviewWidth / 2;
         [self layoutIfNeeded];
     }
     CMTime duration = self.player.currentItem.duration;
     
-    if (_isDoneLoading) {
+//    if (_isDoneLoading) {
         Float64 seconds = CMTimeGetSeconds(duration);
         double value = (Float64) self.videoSlider.value * seconds;
         CMTime seekTime = CMTimeMake((int64_t) value, 1);
@@ -221,7 +224,7 @@ CGFloat viewPreviewWidth = 0;
             default:
                 break;
         }
-    }
+//    }
 }
 
 - (void)seekTime:(CMTime)time {
@@ -278,9 +281,11 @@ CGFloat viewPreviewWidth = 0;
 - (void)handlePlay:(UIButton *)sender {
     if (_isPlaying && !_isDonePlaying) {
         [_player pause];
+        _isFourceStop = true;
         [self.pausePlayButton setImage:[UIImage imageNamed:@"play"] forState:UIControlStateNormal];
     } else if (!_isPlaying && !_isDonePlaying) {
         [_player play];
+        _isFourceStop = false;
         [_pausePlayButton setImage:[UIImage imageNamed:@"pause"] forState:UIControlStateNormal];
     } else {
         self.videoSlider.value = 0;
@@ -303,6 +308,7 @@ CGFloat viewPreviewWidth = 0;
         _isDoneLoading = false;
         _isSetTimmer = false;
         _isDonePlaying = false;
+        _isFourceStop = false;
         
         viewPreviewWidth = (UIScreen.mainScreen.bounds.size.width - 3 * marginIn) / 2;
         beginPoint = marginIn + viewPreviewWidth / 2;
@@ -331,7 +337,7 @@ CGFloat viewPreviewWidth = 0;
     [self.controlsContainerView addSubview:self.activitiesIndicatorView];
     [[self.activitiesIndicatorView.centerXAnchor constraintEqualToAnchor:self.controlsContainerView.centerXAnchor]setActive:true];
     [[self.activitiesIndicatorView.centerYAnchor constraintEqualToAnchor:self.controlsContainerView.centerYAnchor]setActive:true];
-
+    
     // pause play button constraints.
     [self.controlsContainerView addSubview:self.pausePlayButton];
     [[self.pausePlayButton.centerYAnchor constraintEqualToAnchor:self.controlsContainerView.centerYAnchor]setActive:true];
@@ -418,11 +424,12 @@ CGFloat viewPreviewWidth = 0;
     // needed constant.
     CMTime interval = CMTimeMake(1, 2);
     __weak __typeof__(self) weakSelf = self;
-    
+//    _player.currentItem.playbackBufferEmpty
     // main player.
-    [_player play];
-    _isPlaying = true;
-    [_player addObserver:self forKeyPath:_loadKey options:NSKeyValueObservingOptionNew context:nil];
+    [_player addObserver:self forKeyPath:_loadKey options: NSKeyValueObservingOptionNew context:nil];
+    [_player addObserver:self forKeyPath: @"currentItem.playbackBufferEmpty" options: NSKeyValueObservingOptionNew context:nil];
+    [_player addObserver:self forKeyPath: @"currentItem.playbackLikelyToKeepUp" options: NSKeyValueObservingOptionNew context:nil];
+    [_player addObserver:self forKeyPath: @"currentItem.playbackBufferFull" options: NSKeyValueObservingOptionNew context:nil];
     [_player addPeriodicTimeObserverForInterval:interval queue:dispatch_get_main_queue() usingBlock:^(CMTime time) {
         __typeof__(self) strongSelf = weakSelf;
         if (!strongSelf) {
@@ -447,6 +454,40 @@ CGFloat viewPreviewWidth = 0;
     }];
 }
 
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
+    
+    if (keyPath == _loadKey) {
+        [self.activitiesIndicatorView stopAnimating];
+        [self.pausePlayButton setHidden:false];
+        if (!_isFourceStop) {
+            [_player play];
+            _isPlaying = true;
+        }
+        if (!_isSetTimmer) {
+            [NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(handleHideShowControlView) userInfo:nil repeats:NO];
+            _isSetTimmer = true;
+        }
+        self.isDoneLoading = true;
+        self.controlsContainerView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.3];
+        CMTime duration = self.player.currentItem.duration;
+        self.videoLenghtLabel.text = [NSString stringWithFormat: @"%@:%@", [self getMin:duration], [self getSecond:duration]];
+    }else if ([keyPath  isEqual: @"currentItem.playbackBufferEmpty"]) {
+        [self.activitiesIndicatorView stopAnimating];
+        [self.pausePlayButton setHidden:false];
+         [self.player play];
+    } else if ([keyPath  isEqual: @"currentItem.playbackLikelyToKeepUp"]) {
+        if (!_isFourceStop) {
+            [self.activitiesIndicatorView startAnimating];
+            [self.pausePlayButton setHidden:true];
+            [self.player pause];
+        }
+    } else if ([keyPath  isEqual: @"currentItem.playbackBufferFull"]) {
+        [self.activitiesIndicatorView stopAnimating];
+        [self.pausePlayButton setHidden:false];
+        [self.player play];
+    }
+}
+
 - (void)donePlaying {
     self.controlsContainerView.alpha = 1;
     UIImage *playbackImage = [[UIImage imageNamed:@"playback"]imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -454,21 +495,7 @@ CGFloat viewPreviewWidth = 0;
     self.pausePlayButton.tintColor = UIColor.whiteColor;
     _isDonePlaying = true;
     _isPlaying = false;
-}
-
-- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
-    if (keyPath == _loadKey) {
-        [self.activitiesIndicatorView stopAnimating];
-        if (!_isSetTimmer) {
-             [NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(handleHideShowControlView) userInfo:nil repeats:NO];
-            _isSetTimmer = true;
-        }
-        self.isDoneLoading = true;
-        self.controlsContainerView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.3];
-        [self.pausePlayButton setHidden:false];
-        CMTime duration = self.player.currentItem.duration;
-        self.videoLenghtLabel.text = [NSString stringWithFormat: @"%@:%@", [self getMin:duration], [self getSecond:duration]];
-    }
+    _isFourceStop = true;
 }
 
 - (void)setUpGradientLayer {
@@ -536,7 +563,7 @@ CGFloat viewPreviewWidth = 0;
     AVAsset *asset = [AVAsset assetWithURL:url];
     AVAssetImageGenerator *assetImageGenerate = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];
     assetImageGenerate.appliesPreferredTrackTransform = true;
-
+    
     CGImageRef imageRef = [assetImageGenerate copyCGImageAtTime:atTime actualTime:nil error:nil];
     UIImage *thumbImage = [UIImage imageWithCGImage:imageRef];
     
