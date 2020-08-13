@@ -7,7 +7,8 @@
 //
 
 #import "VideoPlayerView.h"
-#import "CustomSlider.h"
+
+// MARK: -- Constants
 
 CGFloat videoSliderHeight = 50;
 CGFloat thumbRadius = 20;
@@ -16,37 +17,23 @@ CGFloat marginIn = 16;
 CGFloat beginPoint = 0;
 CGFloat stopPoint = 0;
 CGFloat viewPreviewWidth = 0;
+NSString *loadedTimeRanges = @"currentItem.loadedTimeRanges";
+NSString *playbackBufferEmpty = @"currentItem.playbackBufferEmpty";
+NSString *playbackLikelyToKeepUp = @"currentItem.playbackLikelyToKeepUp";
+NSString *playbackBufferFull = @"currentItem.playbackBufferFull";
+
+// MARK: -- Interface.
 
 @interface VideoPlayerView () {
     NSLayoutConstraint *viewPreviewXConstraints;
 }
-@property (nonatomic, strong) UIActivityIndicatorView *activitiesIndicatorView;
-@property (nonatomic, strong) UIButton *pausePlayButton;
-@property (nonatomic, strong) UILabel *currentTimeLabel;
-@property (nonatomic, strong) UILabel *videoLenghtLabel;
-@property (nonatomic, strong) UILabel *slashLabel;
-@property (nonatomic, strong) CustomSlider *videoSlider;
-@property (nonatomic, strong) UIImageView *imageFullScreen;
-@property (nonatomic, strong) UIView *controlsContainerView;
-@property (nonatomic, assign) bool isPlaying;
-@property (nonatomic, assign) bool isSliding;
-@property (nonatomic, assign) bool isDoneLoading;
-@property (nonatomic, assign) bool isSetTimmer;
-@property (nonatomic, assign) bool isDonePlaying;
-@property (nonatomic, assign) bool isFourceStop;
-@property (nonatomic, assign) NSString *urlString;
-@property (nonatomic, strong) AVPlayer *player;
-@property (nonatomic, strong) AVPlayer *playerPreview;
-@property (nonatomic, assign) NSString *loadKey;
-@property (nonatomic, assign) AVPlayerLayer *videoPlayerLayer;
-@property (nonatomic, assign) AVPlayerLayer *videoPreviewLayer;
-@property (nonatomic, assign) NSLayoutConstraint *videoSliderBottomConstraints;
-@property (nonatomic, assign) NSTimer *timer;
-@property (nonatomic, strong) UILabel *trackTimeLabel;
-@property (nonatomic, strong) UIView *viewPreview;
 @end
 
+// MARK: -- Implementation.
+
 @implementation VideoPlayerView
+
+// MARK: -- View components init functions.
 
 - (UIActivityIndicatorView *)activitiesIndicatorView {
     if (!_activitiesIndicatorView) {
@@ -144,8 +131,47 @@ CGFloat viewPreviewWidth = 0;
     return _videoSlider;
 }
 
-- (void)sliderTapped:(UIGestureRecognizer *)g
-{
+- (UIImageView *)imageFullScreen {
+    if (!_imageFullScreen) {
+        _imageFullScreen = [UIImageView new];
+        _imageFullScreen.image = [UIImage imageNamed:@"fullScreen"];
+        _imageFullScreen.image = [_imageFullScreen.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        _imageFullScreen.tintColor = UIColor.whiteColor;
+        _imageFullScreen.translatesAutoresizingMaskIntoConstraints = false;
+        [_imageFullScreen setUserInteractionEnabled:true];
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(handleFullScreen:)];
+        [_imageFullScreen addGestureRecognizer:tap];
+    }
+    return _imageFullScreen;
+}
+
+- (UIView *)controlsContainerView {
+    if (!_controlsContainerView) {
+        _controlsContainerView = [UIView new];
+        _controlsContainerView.backgroundColor = UIColor.blackColor;
+        _controlsContainerView.translatesAutoresizingMaskIntoConstraints = false;
+    }
+    
+    return _controlsContainerView;
+}
+
+- (UIImage *)makeCircleWith:(CGSize)size color: (UIColor*) color {
+    UIGraphicsBeginImageContextWithOptions(size, false, 0);
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    CGContextSetFillColorWithColor(context, color.CGColor);
+    CGContextSetStrokeColorWithColor(context, UIColor.clearColor.CGColor);
+    CGRect bounds = CGRectMake(0, 0, size.width, size.height);
+    CGContextAddEllipseInRect(context, bounds);
+    CGContextDrawPath(context, kCGPathFill);
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
+}
+
+// MARK: -- Selector function.
+
+// Slider selector functions.
+- (void)sliderTapped:(UIGestureRecognizer *)g {
     if (_isDoneLoading) {
         UISlider* s = (UISlider*)g.view;
         if (s.highlighted) {
@@ -177,7 +203,7 @@ CGFloat viewPreviewWidth = 0;
 
 - (void)handleSliderChange: (UISlider *)slider event: (UIEvent *) event {
     _isFourceStop = false;
-
+    
     CGRect trackRect = [slider trackRectForBounds:slider.bounds];
     CGRect thumbRect = [slider thumbRectForBounds:slider.bounds trackRect:trackRect value:slider.value];
     
@@ -186,67 +212,46 @@ CGFloat viewPreviewWidth = 0;
         [self layoutIfNeeded];
     }
     CMTime duration = self.player.currentItem.duration;
+    Float64 seconds = CMTimeGetSeconds(duration);
+    double value = (Float64) self.videoSlider.value * seconds;
+    CMTime seekTime = CMTimeMake((int64_t) value, 1);
     
-//    if (_isDoneLoading) {
-        Float64 seconds = CMTimeGetSeconds(duration);
-        double value = (Float64) self.videoSlider.value * seconds;
-        CMTime seekTime = CMTimeMake((int64_t) value, 1);
-        
-        // handle slider state.
-        UITouch *touchEvent = [[event allTouches] anyObject];
-        switch (touchEvent.phase) {
-            case UITouchPhaseBegan:
-                self.isSliding = true;
-                [self stopTimer];
+    // handle slider state.
+    UITouch *touchEvent = [[event allTouches] anyObject];
+    switch (touchEvent.phase) {
+        case UITouchPhaseBegan:
+            self.isSliding = true;
+            [self stopTimer];
+            [_player pause];
+            [self hideTimeLabel:YES];
+            if (_isDonePlaying) {
+                [self.pausePlayButton setImage:[UIImage imageNamed:@"play"] forState:UIControlStateNormal];
+            }
+            break;
+        case UITouchPhaseMoved:
+            [self.playerPreview seekToTime:seekTime completionHandler:^(BOOL finished) {
+            }];
+            break;
+        case UITouchPhaseEnded:
+            [self setTimer];
+            [self hideTimeLabel:NO];
+            if (self->_isPlaying) {
+                [self->_player play];
+            }
+            if (_isDonePlaying) {
                 [_player pause];
-                [self hideTimeLabel:YES];
-                if (_isDonePlaying) {
-                    [self.pausePlayButton setImage:[UIImage imageNamed:@"play"] forState:UIControlStateNormal];
-                }
-                break;
-            case UITouchPhaseMoved:
-                [self.playerPreview seekToTime:seekTime completionHandler:^(BOOL finished) {
-                }];
-                break;
-            case UITouchPhaseEnded:
-                [self setTimer];
-                [self hideTimeLabel:NO];
-                if (self->_isPlaying) {
-                    [self->_player play];
-                }
-                if (_isDonePlaying) {
-                    [_player pause];
-                    self.isDonePlaying = false;
-                    self.isPlaying = false;
-                }
-                [self seekTime:seekTime];
-                break;
-            default:
-                break;
-        }
-//    }
-}
-
-- (void)seekTime:(CMTime)time {
-    [self.player seekToTime:time completionHandler:^(BOOL finished) {
-        self.isSliding = false;
-    }];
-}
-
-- (UIImageView *)imageFullScreen {
-    if (!_imageFullScreen) {
-        _imageFullScreen = [UIImageView new];
-        _imageFullScreen.image = [UIImage imageNamed:@"fullScreen"];
-        _imageFullScreen.image = [_imageFullScreen.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-        _imageFullScreen.tintColor = UIColor.whiteColor;
-        _imageFullScreen.translatesAutoresizingMaskIntoConstraints = false;
-        [_imageFullScreen setUserInteractionEnabled:true];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(handleFullScreen:)];
-        [_imageFullScreen addGestureRecognizer:tap];
+                self.isDonePlaying = false;
+                self.isPlaying = false;
+            }
+            [self seekTime:seekTime];
+            break;
+        default:
+            break;
     }
-    return _imageFullScreen;
+    
 }
 
+// Full screen image selector function.
 - (void)handleFullScreen: (UIImageView *)sender {
     NSNumber *value = UIDeviceOrientationIsLandscape([UIDevice currentDevice].orientation) ? [NSNumber numberWithInt:UIInterfaceOrientationPortrait] : [NSNumber numberWithInt:UIInterfaceOrientationLandscapeRight];
     [[UIDevice currentDevice] setValue:value forKey:@"orientation"];
@@ -255,29 +260,7 @@ CGFloat viewPreviewWidth = 0;
     [self setTimer];
 }
 
-- (UIView *)controlsContainerView {
-    if (!_controlsContainerView) {
-        _controlsContainerView = [UIView new];
-        _controlsContainerView.backgroundColor = UIColor.blackColor;
-        _controlsContainerView.translatesAutoresizingMaskIntoConstraints = false;
-    }
-    
-    return _controlsContainerView;
-}
-
-- (UIImage *)makeCircleWith:(CGSize)size color: (UIColor*) color {
-    UIGraphicsBeginImageContextWithOptions(size, false, 0);
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    CGContextSetFillColorWithColor(context, color.CGColor);
-    CGContextSetStrokeColorWithColor(context, UIColor.clearColor.CGColor);
-    CGRect bounds = CGRectMake(0, 0, size.width, size.height);
-    CGContextAddEllipseInRect(context, bounds);
-    CGContextDrawPath(context, kCGPathFill);
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
-}
-
+// Pause play selector function.
 - (void)handlePlay:(UIButton *)sender {
     if (_isPlaying && !_isDonePlaying) {
         [_player pause];
@@ -299,40 +282,148 @@ CGFloat viewPreviewWidth = 0;
     [self setTimer];
 }
 
-- (instancetype)initWithFrame:(CGRect)frame
-{
+// Timer selector fucntion.
+- (void)handleHideShowControlView {
+    if (_isDoneLoading) {
+        [UIView animateWithDuration:0.3 animations:^{
+            self.controlsContainerView.alpha =  self.controlsContainerView.alpha == 1 ? 0 : 1;
+            [self stopTimer];
+        }];
+        if (self.controlsContainerView.alpha == 1) {
+            [self setTimer];
+        }
+    }
+}
+
+// Video player finish play selector function.
+- (void)donePlaying {
+    self.controlsContainerView.alpha = 1;
+    UIImage *playbackImage = [[UIImage imageNamed:@"playback"]imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    [self.pausePlayButton setImage:playbackImage forState:UIControlStateNormal];
+    self.pausePlayButton.tintColor = UIColor.whiteColor;
+    _isDonePlaying = true;
+    _isPlaying = false;
+    _isFourceStop = true;
+}
+
+// MARK: -- View life cycle functions.
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self->_videoPlayerLayer.frame = self.bounds;
+    });
+    // change layout when lanscaping.
+    _videoSliderBottomConstraints.constant = UIDeviceOrientationIsLandscape([UIDevice currentDevice].orientation) ? -30 : videoSliderHeight / 2;
+    [self layoutIfNeeded];
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        _isPlaying = false;
-        _isSliding = false;
-        _isDoneLoading = false;
-        _isSetTimmer = false;
-        _isDonePlaying = false;
-        _isFourceStop = false;
-        
-        viewPreviewWidth = (UIScreen.mainScreen.bounds.size.width - 3 * marginIn) / 2;
-        beginPoint = marginIn + viewPreviewWidth / 2;
-        stopPoint = UIScreen.mainScreen.bounds.size.width - beginPoint;
-        
-        _urlString = @"https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4";
-        _loadKey = @"currentItem.loadedTimeRanges";
-        
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(handleHideShowControlView)];
-        [self addGestureRecognizer:tap];
-        [self setUpPlayerViews];
+        [self initView];
     }
     return self;
 }
 
-- (instancetype)initWithCoder:(NSCoder *)coder
-{
+- (instancetype)initWithCoder:(NSCoder *)coder {
     self = [super initWithCoder:coder];
     if (self) {
+        [self initView];
     }
     return self;
 }
 
-- (void)setUpViews {
+- (void)initView {
+    // initial state view.
+    _isPlaying = false;
+    _isSliding = false;
+    _isDoneLoading = false;
+    _isSetTimmer = false;
+    _isDonePlaying = false;
+    _isFourceStop = false;
+    
+    viewPreviewWidth = (UIScreen.mainScreen.bounds.size.width - 3 * marginIn) / 2;
+    beginPoint = marginIn + viewPreviewWidth / 2;
+    stopPoint = UIScreen.mainScreen.bounds.size.width - beginPoint;
+    
+    _urlString = @"https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4";
+    
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(handleHideShowControlView)];
+    [self addGestureRecognizer:tap];
+    [self setUpPlayerViews];
+}
+
+// MARK: -- Set up constraints functions.
+
+- (void)setUpPlayerViews {
+    NSURL *url = [NSURL URLWithString:_urlString];
+    
+    [self initVideoPlayerWith:url];
+    
+    [self initPreviewPlayerWith:url];
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self setUpVideoPlayer];
+        
+        [self setUpControllerView];
+        
+        [self setUpVideoPreview];
+    });
+    
+    [self setUpDonePlayingNotify];
+    
+    [self setVideoPlayerUpObserver];
+    
+    [self setUpPreviewPlayerObserver];
+}
+
+- (void)initVideoPlayerWith:(NSURL *)url {
+    self->_player = [AVPlayer playerWithURL:url];
+    self->_videoPlayerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
+}
+
+- (void)setUpVideoPlayer {
+    self->_videoPlayerLayer.frame = self.bounds;
+    [self.layer addSublayer:self->_videoPlayerLayer];
+}
+
+- (void)initPreviewPlayerWith:(NSURL *)url {
+    self->_playerPreview = [AVPlayer playerWithURL:url];
+    self->_videoPreviewLayer = [AVPlayerLayer playerLayerWithPlayer:_playerPreview];
+}
+
+- (void)setUpVideoPreview {
+    self->_videoPreviewLayer.frame = CGRectMake(0, 0, viewPreviewWidth, viewPreviewWidth * (9.0 / 16.0));
+    [self.viewPreview.layer addSublayer:self->_videoPreviewLayer];
+}
+
+- (void)setUpControllerView {
+    [self setUpGradientLayer];
+    [self setUpConstraints];
+}
+
+/// Add gradient for controller view.
+- (void)setUpGradientLayer {
+    CAGradientLayer *gradient = [CAGradientLayer new];
+    gradient.frame = self.bounds;
+    NSArray<UIColor *> *arrayColor = [[NSArray alloc]initWithObjects:UIColor.clearColor, UIColor.blackColor, nil];
+    gradient.colors = [NSArray arrayWithArray:arrayColor];
+    NSArray<NSNumber *> * locations = [[NSArray alloc]initWithObjects: [NSNumber numberWithFloat:0.7], [NSNumber numberWithFloat:1.2], nil];
+    gradient.locations = locations;
+    [self.controlsContainerView.layer addSublayer:gradient];
+}
+
+/// ControlsContainerViewConstraints.
+- (void)setUpConstraints {
+    
+    // controlsContainerView constraints.
+    [self addSubview:self.controlsContainerView];
+    [[self.controlsContainerView.topAnchor constraintEqualToAnchor:self.topAnchor]setActive:true];
+    [[self.controlsContainerView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor]setActive:true];
+    [[self.controlsContainerView.rightAnchor constraintEqualToAnchor:self.rightAnchor]setActive:true];
+    [[self.controlsContainerView.leftAnchor constraintEqualToAnchor:self.leftAnchor]setActive:true];
+    
     // activities indicator constraints.
     [self.controlsContainerView addSubview:self.activitiesIndicatorView];
     [[self.activitiesIndicatorView.centerXAnchor constraintEqualToAnchor:self.controlsContainerView.centerXAnchor]setActive:true];
@@ -392,44 +483,20 @@ CGFloat viewPreviewWidth = 0;
     
 }
 
-- (void)setUpPlayerViews {
-    NSURL *url = [NSURL URLWithString:_urlString];
-    _player = [AVPlayer playerWithURL:url];
-    _videoPlayerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
-    
-    _playerPreview = [AVPlayer playerWithURL:url];
-    _videoPreviewLayer = [AVPlayerLayer playerLayerWithPlayer:_playerPreview];
-    
-    // set up all constraints.
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self->_videoPlayerLayer.frame = self.bounds;
-        [self.layer addSublayer:self->_videoPlayerLayer];
-        
-        [self setUpGradientLayer];
-        [self addSubview:self.controlsContainerView];
-        [[self.controlsContainerView.topAnchor constraintEqualToAnchor:self.topAnchor]setActive:true];
-        [[self.controlsContainerView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor]setActive:true];
-        [[self.controlsContainerView.rightAnchor constraintEqualToAnchor:self.rightAnchor]setActive:true];
-        [[self.controlsContainerView.leftAnchor constraintEqualToAnchor:self.leftAnchor]setActive:true];
-        [self setUpViews];
-        
-        // set up preview player layer.
-        self->_videoPreviewLayer.frame = CGRectMake(0, 0, viewPreviewWidth, viewPreviewWidth * (9.0 / 16.0));
-        [self.viewPreview.layer addSublayer:self->_videoPreviewLayer];
-    });
-    
-    // done playing notify.
+// MARK: -- Observer set up functions.
+
+/// Notify when video player finish playing.
+- (void)setUpDonePlayingNotify {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(donePlaying) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
-    
-    // needed constant.
+}
+
+- (void)setVideoPlayerUpObserver {
     CMTime interval = CMTimeMake(1, 2);
     __weak __typeof__(self) weakSelf = self;
-//    _player.currentItem.playbackBufferEmpty
-    // main player.
-    [_player addObserver:self forKeyPath:_loadKey options: NSKeyValueObservingOptionNew context:nil];
-    [_player addObserver:self forKeyPath: @"currentItem.playbackBufferEmpty" options: NSKeyValueObservingOptionNew context:nil];
-    [_player addObserver:self forKeyPath: @"currentItem.playbackLikelyToKeepUp" options: NSKeyValueObservingOptionNew context:nil];
-    [_player addObserver:self forKeyPath: @"currentItem.playbackBufferFull" options: NSKeyValueObservingOptionNew context:nil];
+    [_player addObserver:self forKeyPath:loadedTimeRanges options: NSKeyValueObservingOptionNew context:nil];
+    [_player addObserver:self forKeyPath:playbackBufferEmpty options: NSKeyValueObservingOptionNew context:nil];
+    [_player addObserver:self forKeyPath:playbackLikelyToKeepUp options: NSKeyValueObservingOptionNew context:nil];
+    [_player addObserver:self forKeyPath:playbackBufferFull options: NSKeyValueObservingOptionNew context:nil];
     [_player addPeriodicTimeObserverForInterval:interval queue:dispatch_get_main_queue() usingBlock:^(CMTime time) {
         __typeof__(self) strongSelf = weakSelf;
         if (!strongSelf) {
@@ -443,8 +510,11 @@ CGFloat viewPreviewWidth = 0;
             strongSelf->_videoSlider.value = (float) (second / durationSeconds);
         }
     }];
-    
-    // preview player
+}
+
+- (void)setUpPreviewPlayerObserver {
+    CMTime interval = CMTimeMake(1, 2);
+    __weak __typeof__(self) weakSelf = self;
     [_playerPreview addPeriodicTimeObserverForInterval:interval queue:dispatch_get_main_queue() usingBlock:^(CMTime time) {
         __typeof__(self) strongSelf = weakSelf;
         if (!strongSelf) {
@@ -455,8 +525,7 @@ CGFloat viewPreviewWidth = 0;
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
-    
-    if (keyPath == _loadKey) {
+    if (keyPath == loadedTimeRanges) {
         [self.activitiesIndicatorView stopAnimating];
         [self.pausePlayButton setHidden:false];
         if (!_isFourceStop) {
@@ -464,71 +533,51 @@ CGFloat viewPreviewWidth = 0;
             _isPlaying = true;
         }
         if (!_isSetTimmer) {
-            [NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(handleHideShowControlView) userInfo:nil repeats:NO];
+            [self setTimer];
             _isSetTimmer = true;
         }
         self.isDoneLoading = true;
         self.controlsContainerView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.3];
         CMTime duration = self.player.currentItem.duration;
         self.videoLenghtLabel.text = [NSString stringWithFormat: @"%@:%@", [self getMin:duration], [self getSecond:duration]];
-    }else if ([keyPath  isEqual: @"currentItem.playbackBufferEmpty"]) {
+    }else if (keyPath == playbackBufferEmpty) {
         [self.activitiesIndicatorView stopAnimating];
         [self.pausePlayButton setHidden:false];
-         [self.player play];
-    } else if ([keyPath  isEqual: @"currentItem.playbackLikelyToKeepUp"]) {
+        [self.player play];
+    }else if (keyPath == playbackLikelyToKeepUp) {
         if (!_isFourceStop) {
             [self.activitiesIndicatorView startAnimating];
             [self.pausePlayButton setHidden:true];
             [self.player pause];
         }
-    } else if ([keyPath  isEqual: @"currentItem.playbackBufferFull"]) {
+    }else if (keyPath == playbackBufferFull) {
         [self.activitiesIndicatorView stopAnimating];
         [self.pausePlayButton setHidden:false];
         [self.player play];
     }
 }
 
-- (void)donePlaying {
-    self.controlsContainerView.alpha = 1;
-    UIImage *playbackImage = [[UIImage imageNamed:@"playback"]imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-    [self.pausePlayButton setImage:playbackImage forState:UIControlStateNormal];
-    self.pausePlayButton.tintColor = UIColor.whiteColor;
-    _isDonePlaying = true;
-    _isPlaying = false;
-    _isFourceStop = true;
-}
-
-- (void)setUpGradientLayer {
-    CAGradientLayer *gradient = [CAGradientLayer new];
-    gradient.frame = self.bounds;
-    NSArray<UIColor *> *arrayColor = [[NSArray alloc]initWithObjects:UIColor.clearColor, UIColor.blackColor, nil];
-    gradient.colors = [NSArray arrayWithArray:arrayColor];
-    NSArray<NSNumber *> * locations = [[NSArray alloc]initWithObjects: [NSNumber numberWithFloat:0.7], [NSNumber numberWithFloat:1.2], nil];
-    gradient.locations = locations;
-    [self.controlsContainerView.layer addSublayer:gradient];
-}
-
-- (void)handleHideShowControlView {
-    if (_isDoneLoading) {
-        [UIView animateWithDuration:0.3 animations:^{
-            self.controlsContainerView.alpha =  self.controlsContainerView.alpha == 1 ? 0 : 1;
-            [self stopTimer];
-        }];
-        if (self.controlsContainerView.alpha == 1) {
-            [self setTimer];
-        }
-    }
-}
-
+// MARK: -- Timer functions.
+/// Handle set timer.
 - (void)setTimer {
     _timer = [NSTimer scheduledTimerWithTimeInterval:2 target:self selector:@selector(handleHideShowControlView) userInfo:nil repeats:NO];
 }
 
+/// Handle stop timer.
 - (void)stopTimer {
     [self.timer invalidate];
     self.timer = nil;
 }
 
+// MARK: -- Helper functions.
+
+- (void)seekTime:(CMTime)time {
+    [self.player seekToTime:time completionHandler:^(BOOL finished) {
+        self.isSliding = false;
+    }];
+}
+
+/// Handle show and hide components when sliding.
 - (void)hideTimeLabel: (BOOL)isShow {
     [self.viewPreview setHidden:!isShow];
     [self.trackTimeLabel setHidden:!isShow];
@@ -537,27 +586,21 @@ CGFloat viewPreviewWidth = 0;
     [self.videoLenghtLabel setHidden:isShow];
 }
 
+/// Handle get seconds.
 - (NSString *)getSecond:(CMTime)time {
     Float64 second = CMTimeGetSeconds(time);
     int calculateSecond = (int) second % 60;
     return [NSString stringWithFormat:@"%02d", calculateSecond];
 }
 
+/// Handle get minutes.
 - (NSString *)getMin:(CMTime)time {
     Float64 second = CMTimeGetSeconds(time);
     int calculateMin = (int) second / 60;
     return [NSString stringWithFormat:@"%02d", calculateMin];
 }
 
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self->_videoPlayerLayer.frame = self.bounds;
-    });
-    _videoSliderBottomConstraints.constant = UIDeviceOrientationIsLandscape([UIDevice currentDevice].orientation) ? -30 : videoSliderHeight / 2;
-    [self layoutIfNeeded];
-}
-
+// for future use.
 -(UIImage *)createThumbnailOfVideoFromRemoteUrl:(CMTime)atTime {
     NSURL *url = [NSURL URLWithString:self.urlString];
     AVAsset *asset = [AVAsset assetWithURL:url];
